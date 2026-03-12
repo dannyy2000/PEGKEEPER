@@ -1,0 +1,10 @@
+# env - never commit private keys
+.env
+
+# forge artifacts
+out/
+cache/
+broadcast/*/
+
+# node modules
+node_modules/
