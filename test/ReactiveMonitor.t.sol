@@ -170,4 +170,34 @@ contract ReactiveMonitorTest is Test {
         vm.expectRevert(ReactiveMonitor.InvalidEventData.selector);
         monitor.react(abi.encode(uint8(99)));
     }
+
+    function test_setHook_ownerCanUpdate() public {
+        address newHook = address(0xBEEF);
+
+        monitor.setHook(newHook);
+
+        assertEq(monitor.hook(), newHook);
+    }
+
+    function test_setHook_nonOwnerReverts() public {
+        vm.prank(address(0xDEAD));
+        vm.expectRevert(ReactiveMonitor.NotOwner.selector);
+        monitor.setHook(address(0xBEEF));
+    }
+
+    function test_setPriceFeed_ownerCanUpdate() public {
+        MockFeed newFeed = new MockFeed();
+
+        monitor.setPriceFeed(address(newFeed));
+
+        assertEq(address(monitor.priceFeed()), address(newFeed));
+    }
+
+    function test_setPriceFeed_nonOwnerReverts() public {
+        MockFeed newFeed = new MockFeed();
+
+        vm.prank(address(0xDEAD));
+        vm.expectRevert(ReactiveMonitor.NotOwner.selector);
+        monitor.setPriceFeed(address(newFeed));
+    }
 }
