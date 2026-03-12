@@ -353,6 +353,53 @@ contract PegKeeperTest is Test {
         );
     }
 
+    // ─── Stub hooks return expected selectors ────────────────────────────────
+
+    function test_beforeInitialize_returnsSelector() public {
+        bytes4 sel = hook.beforeInitialize(lp1, _key(), 0);
+        assertEq(sel, IHooks.beforeInitialize.selector);
+    }
+
+    function test_beforeRemoveLiquidity_returnsSelector() public {
+        bytes4 sel = hook.beforeRemoveLiquidity(lp1, _key(), _params(-100, 100), "");
+        assertEq(sel, IHooks.beforeRemoveLiquidity.selector);
+    }
+
+    function test_afterRemoveLiquidity_returnsSelectorAndZeroDelta() public {
+        (bytes4 sel, BalanceDelta delta) = hook.afterRemoveLiquidity(
+            lp1,
+            _key(),
+            _params(-100, 100),
+            BalanceDeltaLibrary.ZERO_DELTA,
+            BalanceDeltaLibrary.ZERO_DELTA,
+            ""
+        );
+        assertEq(sel, IHooks.afterRemoveLiquidity.selector);
+        assertEq(BalanceDelta.unwrap(delta), BalanceDelta.unwrap(BalanceDeltaLibrary.ZERO_DELTA));
+    }
+
+    function test_afterSwap_returnsSelectorAndZeroInt128() public {
+        (bytes4 sel, int128 returnedDelta) = hook.afterSwap(
+            lp1,
+            _key(),
+            _swapParams(),
+            BalanceDeltaLibrary.ZERO_DELTA,
+            ""
+        );
+        assertEq(sel, IHooks.afterSwap.selector);
+        assertEq(returnedDelta, 0);
+    }
+
+    function test_beforeDonate_returnsSelector() public {
+        bytes4 sel = hook.beforeDonate(lp1, _key(), 1e18, 2e18, "");
+        assertEq(sel, IHooks.beforeDonate.selector);
+    }
+
+    function test_afterDonate_returnsSelector() public {
+        bytes4 sel = hook.afterDonate(lp1, _key(), 1e18, 2e18, "");
+        assertEq(sel, IHooks.afterDonate.selector);
+    }
+
     // ─── beforeSwap — dynamic fee per stage ──────────────────────────────────
 
     function test_beforeSwap_greenFee() public {
