@@ -27,9 +27,9 @@ contract DeployReactiveSender is Script {
             feed: vm.envAddress("BASE_SOURCE_FEED_ADDRESS")
         });
 
-        ReactiveSender.SourceConfig memory arbitrumSource = ReactiveSender.SourceConfig({
-            chainId: vm.envUint("ARBITRUM_SOURCE_CHAIN_ID"),
-            feed: vm.envAddress("ARBITRUM_SOURCE_FEED_ADDRESS")
+        ReactiveSender.SourceConfig memory polygonAmoySource = ReactiveSender.SourceConfig({
+            chainId: vm.envUint("POLYGON_AMOY_SOURCE_CHAIN_ID"),
+            feed: vm.envAddress("POLYGON_AMOY_SOURCE_FEED_ADDRESS")
         });
 
         vm.startBroadcast(deployerKey);
@@ -40,7 +40,7 @@ contract DeployReactiveSender is Script {
             callbackGasLimit,
             ethereumSource,
             baseSource,
-            arbitrumSource
+            polygonAmoySource
         );
 
         vm.stopBroadcast();
