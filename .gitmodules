@@ -6,4 +6,4 @@
 	url = https://github.com/uniswap/v4-periphery
 [submodule "lib/reactive-lib"]
 	path = lib/reactive-lib
-	url = https://github.com/Reactive-Network/reactive-lib
+	url = https://github.com/reactive-network/reactive-lib
