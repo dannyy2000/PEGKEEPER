@@ -41,6 +41,8 @@ contract ReactiveMonitorTest is Test {
     uint8 internal constant CHAIN_ETHEREUM = 1;
     uint8 internal constant CHAIN_BASE = 2;
     uint8 internal constant CHAIN_ARBITRUM = 3;
+    address internal constant CALLBACK_PROXY = 0x9291454c02678A65beD47E7A8874D5AC65751B84;
+    address internal constant AUTHORIZED_RVM_ID = address(0xCAFE);
 
     MockPegKeeper internal pegKeeper;
     MockFeed internal feed;
@@ -199,5 +201,56 @@ contract ReactiveMonitorTest is Test {
         vm.prank(address(0xDEAD));
         vm.expectRevert(ReactiveMonitor.NotOwner.selector);
         monitor.setPriceFeed(address(newFeed));
+    }
+
+    function test_setAuthorizedReactiveSender_ownerCanUpdate() public {
+        monitor.setAuthorizedReactiveSender(AUTHORIZED_RVM_ID);
+
+        assertEq(monitor.authorizedReactiveSender(), AUTHORIZED_RVM_ID);
+    }
+
+    function test_setAuthorizedReactiveSender_nonOwnerReverts() public {
+        vm.prank(address(0xDEAD));
+        vm.expectRevert(ReactiveMonitor.NotOwner.selector);
+        monitor.setAuthorizedReactiveSender(AUTHORIZED_RVM_ID);
+    }
+
+    function test_receiveReactiveAlert_revertsIfNotCallbackProxy() public {
+        IPegKeeper.DepegAlert memory alert = _alert(IPegKeeper.Stage.YELLOW);
+        monitor.setAuthorizedReactiveSender(AUTHORIZED_RVM_ID);
+
+        vm.expectRevert(ReactiveMonitor.NotCallbackProxy.selector);
+        monitor.receiveReactiveAlert(AUTHORIZED_RVM_ID, alert);
+    }
+
+    function test_receiveReactiveAlert_revertsIfRvmIdNotAuthorized() public {
+        monitor.setAuthorizedReactiveSender(AUTHORIZED_RVM_ID);
+
+        vm.prank(CALLBACK_PROXY);
+        vm.expectRevert(ReactiveMonitor.InvalidReactiveSender.selector);
+        monitor.receiveReactiveAlert(address(0xDEAD), _alert(IPegKeeper.Stage.YELLOW));
+    }
+
+    function test_receiveReactiveAlert_forwardsAlertToPegKeeper() public {
+        IPegKeeper.DepegAlert memory alert = _alert(IPegKeeper.Stage.ORANGE);
+        monitor.setAuthorizedReactiveSender(AUTHORIZED_RVM_ID);
+
+        vm.prank(CALLBACK_PROXY);
+        monitor.receiveReactiveAlert(AUTHORIZED_RVM_ID, alert);
+
+        assertEq(uint8(monitor.currentStage()), uint8(IPegKeeper.Stage.ORANGE));
+        assertEq(uint8(pegKeeper.getLastAlert().stage), uint8(IPegKeeper.Stage.ORANGE));
+        assertEq(pegKeeper.callCount(), 1);
+    }
+
+    function _alert(IPegKeeper.Stage stage) internal view returns (IPegKeeper.DepegAlert memory) {
+        return IPegKeeper.DepegAlert({
+            stage: stage,
+            ethereumPriceBps: 9_970,
+            basePriceBps: 9_960,
+            arbitrumPriceBps: 9_950,
+            chainsAffected: 2,
+            timestamp: block.timestamp
+        });
     }
 }
