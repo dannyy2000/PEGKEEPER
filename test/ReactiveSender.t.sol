@@ -45,7 +45,7 @@ contract ReactiveSenderTest is Test {
 
     function test_singleChainPressure_doesNotEmitCallback() public {
         vm.recordLogs();
-        sender.react(_log(ETHEREUM_SEPOLIA, 9_970));
+        sender.react(_log(ETHEREUM_SEPOLIA, 10_000, 9_970));
 
         Vm.Log[] memory logs = vm.getRecordedLogs();
         assertEq(logs.length, 0);
@@ -53,7 +53,7 @@ contract ReactiveSenderTest is Test {
     }
 
     function test_twoChainsPressure_emitsYellowCallback() public {
-        sender.react(_log(ETHEREUM_SEPOLIA, 9_970));
+        sender.react(_log(ETHEREUM_SEPOLIA, 10_000, 9_970));
 
         IPegKeeper.DepegAlert memory alert = IPegKeeper.DepegAlert({
             stage: IPegKeeper.Stage.YELLOW,
@@ -76,18 +76,18 @@ contract ReactiveSenderTest is Test {
             )
         );
 
-        sender.react(_log(BASE_SEPOLIA, 9_960));
+        sender.react(_log(BASE_SEPOLIA, 10_000, 9_960));
 
         assertEq(uint8(sender.currentStage()), uint8(IPegKeeper.Stage.YELLOW));
     }
 
     function test_recovery_emitsGreenCallback() public {
-        sender.react(_log(ETHEREUM_SEPOLIA, 9_840));
-        sender.react(_log(BASE_SEPOLIA, 9_840));
-        sender.react(_log(ARBITRUM_SEPOLIA, 9_840));
+        sender.react(_log(ETHEREUM_SEPOLIA, 10_000, 9_840));
+        sender.react(_log(BASE_SEPOLIA, 10_000, 9_840));
+        sender.react(_log(ARBITRUM_SEPOLIA, 10_000, 9_840));
 
-        sender.react(_log(ETHEREUM_SEPOLIA, 10_000));
-        sender.react(_log(BASE_SEPOLIA, 10_000));
+        sender.react(_log(ETHEREUM_SEPOLIA, 9_840, 10_000));
+        sender.react(_log(BASE_SEPOLIA, 9_840, 10_000));
 
         IPegKeeper.DepegAlert memory alert = IPegKeeper.DepegAlert({
             stage: IPegKeeper.Stage.GREEN,
@@ -110,29 +110,46 @@ contract ReactiveSenderTest is Test {
             )
         );
 
-        sender.react(_log(ARBITRUM_SEPOLIA, 10_000));
+        sender.react(_log(ARBITRUM_SEPOLIA, 9_840, 10_000));
 
         assertEq(uint8(sender.currentStage()), uint8(IPegKeeper.Stage.GREEN));
     }
 
-    function test_react_revertsOnNonPositiveAnswer() public {
-        vm.expectRevert(abi.encodeWithSelector(ReactiveSender.InvalidAnswer.selector, int256(0)));
-        sender.react(_rawLog(ETHEREUM_SEPOLIA, 0));
+    function test_react_revertsOnMalformedData() public {
+        vm.expectRevert(ReactiveSender.InvalidEventData.selector);
+        sender.react(_malformedLog(ETHEREUM_SEPOLIA));
     }
 
-    function _log(uint256 chainId, uint256 priceBps) internal pure returns (IReactive.LogRecord memory logRecord) {
-        return _rawLog(chainId, _answerFromBps(priceBps));
-    }
-
-    function _rawLog(uint256 chainId, uint256 answer) internal pure returns (IReactive.LogRecord memory logRecord) {
+    function _log(
+        uint256 chainId,
+        uint256 oldPriceBps,
+        uint256 newPriceBps
+    ) internal pure returns (IReactive.LogRecord memory logRecord) {
         return IReactive.LogRecord({
             chain_id: chainId,
             _contract: address(0),
             topic_0: senderTopic(),
-            topic_1: answer,
-            topic_2: 1,
+            topic_1: 0,
+            topic_2: 0,
             topic_3: 0,
-            data: abi.encode(uint256(1_234_567)),
+            data: abi.encode(oldPriceBps, newPriceBps),
+            block_number: 0,
+            op_code: 0,
+            block_hash: 0,
+            tx_hash: 0,
+            log_index: 0
+        });
+    }
+
+    function _malformedLog(uint256 chainId) internal pure returns (IReactive.LogRecord memory logRecord) {
+        return IReactive.LogRecord({
+            chain_id: chainId,
+            _contract: address(0),
+            topic_0: senderTopic(),
+            topic_1: 0,
+            topic_2: 0,
+            topic_3: 0,
+            data: abi.encode(uint256(1)),
             block_number: 0,
             op_code: 0,
             block_hash: 0,
@@ -142,10 +159,6 @@ contract ReactiveSenderTest is Test {
     }
 
     function senderTopic() internal pure returns (uint256) {
-        return uint256(keccak256("AnswerUpdated(int256,uint256,uint256)"));
-    }
-
-    function _answerFromBps(uint256 priceBps) internal pure returns (uint256) {
-        return (priceBps * 1e8) / 10_000;
+        return uint256(keccak256("PriceUpdated(uint8,uint256,uint256)"));
     }
 }

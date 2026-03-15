@@ -8,7 +8,7 @@ import {IPegKeeper} from "./interfaces/IPegKeeper.sol";
 import {IReactiveMonitor} from "./interfaces/IReactiveMonitor.sol";
 
 /// @title ReactiveSender
-/// @notice Kopli-side Reactive contract that watches Chainlink USDC/USD update events
+/// @notice Kopli-side Reactive contract that watches mock feed price update events
 ///         across source chains and dispatches cross-chain alerts to Unichain.
 contract ReactiveSender is IReactive, AbstractReactive {
     address internal constant SYSTEM_CONTRACT_HELPER = address(0x64);
@@ -18,15 +18,13 @@ contract ReactiveSender is IReactive, AbstractReactive {
     error InvalidSourceConfig();
     error InvalidEventTopic();
     error InvalidEventData();
-    error InvalidAnswer(int256 answer);
     error UnsupportedSourceChain(uint256 chainId);
 
     uint256 public constant PEG_BPS = 10_000;
     uint256 public constant YELLOW_THRESHOLD_BPS = 9_990;
     uint256 public constant ORANGE_THRESHOLD_BPS = 9_950;
     uint256 public constant RED_THRESHOLD_BPS = 9_850;
-    uint256 public constant CHAINLINK_FEED_DECIMALS = 1e8;
-    uint256 public constant ANSWER_UPDATED_TOPIC = uint256(keccak256("AnswerUpdated(int256,uint256,uint256)"));
+    uint256 public constant PRICE_UPDATED_TOPIC = uint256(keccak256("PriceUpdated(uint8,uint256,uint256)"));
 
     struct SourceConfig {
         uint256 chainId;
@@ -94,11 +92,10 @@ contract ReactiveSender is IReactive, AbstractReactive {
 
     /// @inheritdoc IReactive
     function react(LogRecord calldata log) external override vmOnly {
-        if (log.topic_0 != ANSWER_UPDATED_TOPIC) revert InvalidEventTopic();
-        if (log.data.length != 32) revert InvalidEventData();
+        if (log.topic_0 != PRICE_UPDATED_TOPIC) revert InvalidEventTopic();
+        if (log.data.length != 64) revert InvalidEventData();
 
-        int256 currentAnswer = int256(log.topic_1);
-        uint256 newPriceBps = _normalizeAnswerToBps(currentAnswer);
+        (, uint256 newPriceBps) = abi.decode(log.data, (uint256, uint256));
         _storePrice(log.chain_id, newPriceBps);
         _evaluateAndDispatch();
     }
@@ -107,7 +104,7 @@ contract ReactiveSender is IReactive, AbstractReactive {
         service.subscribe(
             source.chainId,
             source.feed,
-            ANSWER_UPDATED_TOPIC,
+            PRICE_UPDATED_TOPIC,
             REACTIVE_IGNORE,
             REACTIVE_IGNORE,
             REACTIVE_IGNORE
@@ -199,8 +196,4 @@ contract ReactiveSender is IReactive, AbstractReactive {
         );
     }
 
-    function _normalizeAnswerToBps(int256 answer) internal pure returns (uint256) {
-        if (answer <= 0) revert InvalidAnswer(answer);
-        return (uint256(answer) * PEG_BPS) / CHAINLINK_FEED_DECIMALS;
-    }
 }
