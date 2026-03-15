@@ -16,10 +16,13 @@ contract ReactiveMonitor is IReactiveMonitor {
     error InvalidHook();
     error InvalidPriceFeed();
     error InvalidEventData();
+    error NotCallbackProxy();
+    error InvalidReactiveSender();
 
     uint8 public constant CHAIN_ETHEREUM = 1;
     uint8 public constant CHAIN_BASE = 2;
     uint8 public constant CHAIN_ARBITRUM = 3;
+    address public constant UNICHAIN_CALLBACK_PROXY = 0x9291454c02678A65beD47E7A8874D5AC65751B84;
 
     uint256 public constant PEG_BPS = 10_000;
     uint256 public constant YELLOW_THRESHOLD_BPS = 9_990; // <= 0.9990
@@ -28,11 +31,13 @@ contract ReactiveMonitor is IReactiveMonitor {
 
     address public owner;
     address public hook;
+    address public authorizedReactiveSender;
     IPriceFeed public priceFeed;
     IPegKeeper.Stage public currentStage;
 
     event HookUpdated(address indexed oldHook, address indexed newHook);
     event PriceFeedUpdated(address indexed oldPriceFeed, address indexed newPriceFeed);
+    event AuthorizedReactiveSenderUpdated(address indexed oldRvmId, address indexed newRvmId);
     event AlertDispatched(
         IPegKeeper.Stage indexed stage,
         uint8 indexed chainsAffected,
@@ -70,11 +75,27 @@ contract ReactiveMonitor is IReactiveMonitor {
     }
 
     /// @inheritdoc IReactiveMonitor
+    function receiveReactiveAlert(address rvmId, IPegKeeper.DepegAlert calldata alert) external override {
+        if (msg.sender != UNICHAIN_CALLBACK_PROXY) revert NotCallbackProxy();
+        if (rvmId == address(0) || rvmId != authorizedReactiveSender) revert InvalidReactiveSender();
+
+        _dispatchAlert(alert);
+    }
+
+    /// @inheritdoc IReactiveMonitor
     function setHook(address hook_) external override onlyOwner {
         if (hook_ == address(0)) revert InvalidHook();
         address oldHook = hook;
         hook = hook_;
         emit HookUpdated(oldHook, hook_);
+    }
+
+    /// @inheritdoc IReactiveMonitor
+    function setAuthorizedReactiveSender(address rvmId) external override onlyOwner {
+        if (rvmId == address(0)) revert InvalidReactiveSender();
+        address oldRvmId = authorizedReactiveSender;
+        authorizedReactiveSender = rvmId;
+        emit AuthorizedReactiveSenderUpdated(oldRvmId, rvmId);
     }
 
     function setPriceFeed(address priceFeed_) external onlyOwner {
@@ -109,7 +130,13 @@ contract ReactiveMonitor is IReactiveMonitor {
             // Single-chain pressure is treated as noise.
             // We only recover to GREEN on full normalization.
             if (chainsAffected == 0 && currentStage != IPegKeeper.Stage.GREEN) {
-                _dispatch(IPegKeeper.Stage.GREEN, eth, base, arb, 0);
+                _dispatch(
+                    IPegKeeper.Stage.GREEN,
+                    eth,
+                    base,
+                    arb,
+                    0
+                );
             }
             return;
         }
@@ -133,8 +160,6 @@ contract ReactiveMonitor is IReactiveMonitor {
         uint256 arb,
         uint8 chainsAffected
     ) internal {
-        currentStage = nextStage;
-
         IPegKeeper.DepegAlert memory alert = IPegKeeper.DepegAlert({
             stage: nextStage,
             ethereumPriceBps: eth,
@@ -144,8 +169,20 @@ contract ReactiveMonitor is IReactiveMonitor {
             timestamp: block.timestamp
         });
 
+        _dispatchAlert(alert);
+    }
+
+    function _dispatchAlert(IPegKeeper.DepegAlert memory alert) internal {
+        currentStage = alert.stage;
         IPegKeeper(hook).receiveAlert(alert);
-        emit AlertDispatched(nextStage, chainsAffected, eth, base, arb, block.timestamp);
+        emit AlertDispatched(
+            alert.stage,
+            alert.chainsAffected,
+            alert.ethereumPriceBps,
+            alert.basePriceBps,
+            alert.arbitrumPriceBps,
+            alert.timestamp
+        );
     }
 
     function _isSupportedChain(uint8 chainId) internal pure returns (bool) {
