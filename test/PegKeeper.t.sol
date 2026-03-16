@@ -253,6 +253,11 @@ contract PegKeeperTest is Test {
         assertEq(sel, IHooks.beforeAddLiquidity.selector);
     }
 
+    function test_beforeAddLiquidity_reverts_ifNotPoolManager() public {
+        vm.expectRevert(PegKeeper.NotPoolManager.selector);
+        hook.beforeAddLiquidity(lp1, _key(), _params(-100, 100), "");
+    }
+
     // ─── afterAddLiquidity — LP profiles ─────────────────────────────────────
 
     function test_afterAddLiquidity_storesConservativeProfile() public {
@@ -353,6 +358,53 @@ contract PegKeeperTest is Test {
         );
     }
 
+    function test_afterAddLiquidity_reverts_ifNotPoolManager() public {
+        vm.expectRevert(PegKeeper.NotPoolManager.selector);
+        hook.afterAddLiquidity(
+            lp1,
+            _key(),
+            _params(-100, 100),
+            BalanceDeltaLibrary.ZERO_DELTA,
+            BalanceDeltaLibrary.ZERO_DELTA,
+            abi.encode(PegKeeper.LPProfile.Conservative)
+        );
+    }
+
+    function test_afterAddLiquidity_differentSaltStoresDistinctPositionKeys() public {
+        PoolKey memory key = _key();
+        IPoolManager.ModifyLiquidityParams memory paramsA = IPoolManager.ModifyLiquidityParams({
+            tickLower: -100,
+            tickUpper: 100,
+            liquidityDelta: 1e18,
+            salt: bytes32(uint256(1))
+        });
+        IPoolManager.ModifyLiquidityParams memory paramsB = IPoolManager.ModifyLiquidityParams({
+            tickLower: -100,
+            tickUpper: 100,
+            liquidityDelta: 1e18,
+            salt: bytes32(uint256(2))
+        });
+
+        vm.startPrank(address(mockPM));
+        hook.afterAddLiquidity(
+            lp1, key, paramsA,
+            BalanceDeltaLibrary.ZERO_DELTA, BalanceDeltaLibrary.ZERO_DELTA,
+            abi.encode(PegKeeper.LPProfile.Conservative)
+        );
+        hook.afterAddLiquidity(
+            lp1, key, paramsB,
+            BalanceDeltaLibrary.ZERO_DELTA, BalanceDeltaLibrary.ZERO_DELTA,
+            abi.encode(PegKeeper.LPProfile.Balanced)
+        );
+        vm.stopPrank();
+
+        bytes32 posKeyA = _posKey(lp1, key.toId(), -100, 100, bytes32(uint256(1)));
+        bytes32 posKeyB = _posKey(lp1, key.toId(), -100, 100, bytes32(uint256(2)));
+
+        assertEq(uint8(hook.lpProfiles(posKeyA)), uint8(PegKeeper.LPProfile.Conservative));
+        assertEq(uint8(hook.lpProfiles(posKeyB)), uint8(PegKeeper.LPProfile.Balanced));
+    }
+
     // ─── Stub hooks return expected selectors ────────────────────────────────
 
     function test_beforeInitialize_returnsSelector() public {
@@ -446,6 +498,11 @@ contract PegKeeperTest is Test {
         vm.prank(address(mockPM));
         (,, uint24 feeOverride) = hook.beforeSwap(address(0), _key(), _swapParams(), "");
         assertEq(feeOverride, hook.FEE_YELLOW() | LPFeeLibrary.OVERRIDE_FEE_FLAG);
+    }
+
+    function test_beforeSwap_reverts_ifNotPoolManager() public {
+        vm.expectRevert(PegKeeper.NotPoolManager.selector);
+        hook.beforeSwap(address(0), _key(), _swapParams(), "");
     }
 
     // ─── Conservative LP auto-withdrawal events at RED ───────────────────────
