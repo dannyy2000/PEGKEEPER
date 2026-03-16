@@ -59,6 +59,16 @@ contract ReactiveMonitorTest is Test {
         monitor = new ReactiveMonitor(address(pegKeeper), address(feed));
     }
 
+    function test_constructor_revertsOnZeroHook() public {
+        vm.expectRevert(ReactiveMonitor.InvalidHook.selector);
+        new ReactiveMonitor(address(0), address(feed));
+    }
+
+    function test_constructor_revertsOnZeroPriceFeed() public {
+        vm.expectRevert(ReactiveMonitor.InvalidPriceFeed.selector);
+        new ReactiveMonitor(address(pegKeeper), address(0));
+    }
+
     function _react() internal {
         monitor.react(abi.encode(CHAIN_ETHEREUM));
     }
@@ -82,6 +92,20 @@ contract ReactiveMonitorTest is Test {
         IPegKeeper.DepegAlert memory alert = pegKeeper.getLastAlert();
         assertEq(uint8(alert.stage), uint8(IPegKeeper.Stage.YELLOW));
         assertEq(alert.chainsAffected, 2);
+    }
+
+    function test_repeatedSameStage_doesNotDispatchAgain() public {
+        feed.setPrice(CHAIN_ETHEREUM, 9_970);
+        feed.setPrice(CHAIN_BASE, 9_970);
+
+        _react();
+        assertEq(pegKeeper.callCount(), 1);
+
+        feed.setPrice(CHAIN_ARBITRUM, 9_980);
+        _react();
+
+        assertEq(pegKeeper.callCount(), 1);
+        assertEq(uint8(monitor.currentStage()), uint8(IPegKeeper.Stage.YELLOW));
     }
 
     function test_threeChainsPressure_escalatesHigherThanYellow() public {
@@ -163,6 +187,31 @@ contract ReactiveMonitorTest is Test {
         assertEq(alert.chainsAffected, 0);
     }
 
+    function test_partialRecovery_doesNotDispatchGreen() public {
+        feed.setPrice(CHAIN_ETHEREUM, 9_840);
+        feed.setPrice(CHAIN_BASE, 9_840);
+        feed.setPrice(CHAIN_ARBITRUM, 9_840);
+        _react();
+        assertEq(pegKeeper.callCount(), 1);
+
+        feed.setPrice(CHAIN_ETHEREUM, 10_000);
+        feed.setPrice(CHAIN_BASE, 10_000);
+        _react();
+
+        assertEq(pegKeeper.callCount(), 1);
+        assertEq(uint8(monitor.currentStage()), uint8(IPegKeeper.Stage.RED));
+    }
+
+    function test_react_acceptsEmptyPayload() public {
+        feed.setPrice(CHAIN_ETHEREUM, 9_970);
+        feed.setPrice(CHAIN_BASE, 9_970);
+
+        monitor.react("");
+
+        assertEq(pegKeeper.callCount(), 1);
+        assertEq(uint8(pegKeeper.getLastAlert().stage), uint8(IPegKeeper.Stage.YELLOW));
+    }
+
     function test_react_revertsOnMalformedEventData() public {
         vm.expectRevert(ReactiveMonitor.InvalidEventData.selector);
         monitor.react(hex"01");
@@ -175,7 +224,8 @@ contract ReactiveMonitorTest is Test {
 
     function test_setHook_ownerCanUpdate() public {
         address newHook = address(0xBEEF);
-
+        vm.expectEmit(true, true, false, false);
+        emit ReactiveMonitor.HookUpdated(address(pegKeeper), newHook);
         monitor.setHook(newHook);
 
         assertEq(monitor.hook(), newHook);
@@ -187,9 +237,15 @@ contract ReactiveMonitorTest is Test {
         monitor.setHook(address(0xBEEF));
     }
 
+    function test_setHook_zeroAddressReverts() public {
+        vm.expectRevert(ReactiveMonitor.InvalidHook.selector);
+        monitor.setHook(address(0));
+    }
+
     function test_setPriceFeed_ownerCanUpdate() public {
         MockFeed newFeed = new MockFeed();
-
+        vm.expectEmit(true, true, false, false);
+        emit ReactiveMonitor.PriceFeedUpdated(address(feed), address(newFeed));
         monitor.setPriceFeed(address(newFeed));
 
         assertEq(address(monitor.priceFeed()), address(newFeed));
@@ -203,7 +259,14 @@ contract ReactiveMonitorTest is Test {
         monitor.setPriceFeed(address(newFeed));
     }
 
+    function test_setPriceFeed_zeroAddressReverts() public {
+        vm.expectRevert(ReactiveMonitor.InvalidPriceFeed.selector);
+        monitor.setPriceFeed(address(0));
+    }
+
     function test_setAuthorizedReactiveSender_ownerCanUpdate() public {
+        vm.expectEmit(true, true, false, false);
+        emit ReactiveMonitor.AuthorizedReactiveSenderUpdated(address(0), AUTHORIZED_RVM_ID);
         monitor.setAuthorizedReactiveSender(AUTHORIZED_RVM_ID);
 
         assertEq(monitor.authorizedReactiveSender(), AUTHORIZED_RVM_ID);
@@ -213,6 +276,11 @@ contract ReactiveMonitorTest is Test {
         vm.prank(address(0xDEAD));
         vm.expectRevert(ReactiveMonitor.NotOwner.selector);
         monitor.setAuthorizedReactiveSender(AUTHORIZED_RVM_ID);
+    }
+
+    function test_setAuthorizedReactiveSender_zeroAddressReverts() public {
+        vm.expectRevert(ReactiveMonitor.InvalidReactiveSender.selector);
+        monitor.setAuthorizedReactiveSender(address(0));
     }
 
     function test_receiveReactiveAlert_revertsIfNotCallbackProxy() public {
@@ -231,6 +299,14 @@ contract ReactiveMonitorTest is Test {
         monitor.receiveReactiveAlert(address(0xDEAD), _alert(IPegKeeper.Stage.YELLOW));
     }
 
+    function test_receiveReactiveAlert_revertsIfRvmIdIsZero() public {
+        monitor.setAuthorizedReactiveSender(AUTHORIZED_RVM_ID);
+
+        vm.prank(CALLBACK_PROXY);
+        vm.expectRevert(ReactiveMonitor.InvalidReactiveSender.selector);
+        monitor.receiveReactiveAlert(address(0), _alert(IPegKeeper.Stage.YELLOW));
+    }
+
     function test_receiveReactiveAlert_forwardsAlertToPegKeeper() public {
         IPegKeeper.DepegAlert memory alert = _alert(IPegKeeper.Stage.ORANGE);
         monitor.setAuthorizedReactiveSender(AUTHORIZED_RVM_ID);
@@ -241,6 +317,24 @@ contract ReactiveMonitorTest is Test {
         assertEq(uint8(monitor.currentStage()), uint8(IPegKeeper.Stage.ORANGE));
         assertEq(uint8(pegKeeper.getLastAlert().stage), uint8(IPegKeeper.Stage.ORANGE));
         assertEq(pegKeeper.callCount(), 1);
+    }
+
+    function test_receiveReactiveAlert_emitsAlertDispatched() public {
+        IPegKeeper.DepegAlert memory alert = _alert(IPegKeeper.Stage.YELLOW);
+        monitor.setAuthorizedReactiveSender(AUTHORIZED_RVM_ID);
+
+        vm.expectEmit(true, true, false, true);
+        emit ReactiveMonitor.AlertDispatched(
+            alert.stage,
+            alert.chainsAffected,
+            alert.ethereumPriceBps,
+            alert.basePriceBps,
+            alert.arbitrumPriceBps,
+            alert.timestamp
+        );
+
+        vm.prank(CALLBACK_PROXY);
+        monitor.receiveReactiveAlert(AUTHORIZED_RVM_ID, alert);
     }
 
     function _alert(IPegKeeper.Stage stage) internal view returns (IPegKeeper.DepegAlert memory) {
