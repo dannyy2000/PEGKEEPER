@@ -14,9 +14,9 @@ via_ir = true
 runs = 1000
 
 [rpc_endpoints]
-unichain_sepolia = "https://sepolia.unichain.org"
-ethereum_sepolia = "https://rpc.sepolia.org"
-base_sepolia = "https://sepolia.base.org"
+unichain_sepolia = "https://1301.rpc.thirdweb.com"
+ethereum_sepolia = "https://ethereum-sepolia-rpc.publicnode.com"
+base_sepolia = "https://84532.rpc.thirdweb.com"
 reactive_kopli = "https://lasna-rpc.rnk.dev/"
 
 [etherscan]
