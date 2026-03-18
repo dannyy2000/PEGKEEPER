@@ -190,6 +190,11 @@ pegkeeper/
 
 ### Unichain
 
+**Where in the code:**
+- `src/PegKeeper.sol` — the hook itself; deployed on Unichain, uses `afterInitialize`, `beforeAddLiquidity`, `afterAddLiquidity`, and `beforeSwap` to apply dynamic fees and gate deposits
+- `src/ReactiveMonitor.sol` — deployed on Unichain; receives the cross-chain callback and forwards alerts to the hook
+- `script/Deploy.s.sol` — deploys the full system to Unichain Sepolia via CREATE2 (required for hook address flags)
+
 PEGKEEPER is deployed exclusively on Unichain and relies on three of its core properties:
 
 **1. Speed**
@@ -202,6 +207,12 @@ The TEE hides the hook's protection response in the mempool until it is already 
 PEGKEEPER makes frequent micro-adjustments as conditions evolve — nudging fees through stages as Reactive updates come in. Each adjustment is a transaction. On Ethereum mainnet, the cumulative gas cost would eat LP profits. On Unichain it is negligible.
 
 ### Reactive Network
+
+**Where in the code:**
+- `src/ReactiveSender.sol` — the Reactive Smart Contract deployed on Lasna; subscribes to `PriceUpdated` events emitted by mock price feeds on Ethereum Sepolia, Base Sepolia, and Polygon Amoy; aggregates multi-chain signals and fires a cross-chain callback to Unichain
+- `src/ReactiveMonitor.sol` — deployed on Unichain; receives the `receiveReactiveAlert()` callback from the Reactive Network proxy and forwards the structured `DepegAlert` to the hook
+- `src/interfaces/IReactiveMonitor.sol` — defines the callback interface that Reactive Network calls into
+- `script/DeployReactiveSender.s.sol` — deploys `ReactiveSender` to Lasna testnet and wires up the subscriptions
 
 Reactive Network provides the cross-chain intelligence layer that PEGKEEPER cannot exist without.
 
@@ -258,7 +269,7 @@ curl -L https://foundry.paradigm.xyz | bash
 foundryup
 
 # Clone the repo
-git clone https://github.com/yourusername/pegkeeper
+git clone https://github.com/dannyy2000/PEGKEEPER
 cd pegkeeper
 
 # Install dependencies
@@ -463,6 +474,8 @@ Built for the **UHI8 Hookathon — Specialized Markets** track.
 Partner integrations: **Unichain** + **Reactive Network**
 
 Category: **Dynamic Stablecoin Managers**
+
+**Demo video:** _coming soon_
 
 ---
 
