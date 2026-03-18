@@ -104,9 +104,9 @@ Deposits re-open, ranges tighten, fees return to normal. LPs can re-enter.
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    REACTIVE NETWORK                             │
+│                    REACTIVE NETWORK (Lasna)                     │
 │                                                                 │
-│   ReactiveMonitor.sol                                           │
+│   ReactiveSender.sol                                            │
 │   - Subscribes to price events on all 3 chains                 │
 │   - Aggregates signals                                          │
 │   - Checks multi-chain threshold conditions                     │
@@ -119,10 +119,11 @@ Deposits re-open, ranges tighten, fees return to normal. LPs can re-enter.
 ┌─────────────────────────────────────────────────────────────────┐
 │                    UNICHAIN (TEE)                               │
 │                                                                 │
+│   ReactiveMonitor.sol — receives callback, forwards alert       │
 │   PegKeeper.sol — Uniswap v4 Hook                               │
 │   - Receives alert from Reactive                                │
 │   - Updates protection stage                                    │
-│   - beforeSwap: applies dynamic fee                             │
+│   - beforeSwap: applies dynamic fee per stage                   │
 │   - beforeAddLiquidity: pauses deposits if ORANGE/RED           │
 │   - Manages LP protection profiles                              │
 │   - Auto-withdraws conservative LPs at RED                      │
@@ -141,19 +142,24 @@ Deposits re-open, ranges tighten, fees return to normal. LPs can re-enter.
 ```
 pegkeeper/
 ├── src/
-│   ├── PegKeeper.sol              # Main Uniswap v4 hook — fee + range management
-│   ├── ReactiveMonitor.sol        # Reactive Network contract — cross-chain watcher
+│   ├── PegKeeper.sol              # Main Uniswap v4 hook — fee + deposit management
+│   ├── ReactiveMonitor.sol        # Unichain receiver — forwards Reactive alerts to hook
+│   ├── ReactiveSender.sol         # Reactive Network contract — cross-chain watcher
 │   ├── MockPriceFeed.sol          # Mock price feed for testing and demo
+│   ├── MockERC20.sol              # Mock token for testnet pool
 │   └── interfaces/
 │       ├── IPegKeeper.sol         # Hook interface
 │       └── IReactiveMonitor.sol   # Reactive monitor interface
 ├── test/
 │   ├── PegKeeper.t.sol            # Unit tests for hook logic
-│   ├── ReactiveMonitor.t.sol      # Unit tests for Reactive contract
-│   └── Integration.t.sol          # End-to-end integration tests
+│   ├── ReactiveMonitor.t.sol      # Unit tests for monitor contract
+│   ├── ReactiveSender.t.sol       # Unit tests for Reactive sender
+│   ├── MockPriceFeed.t.sol        # Unit tests for price feed
+│   └── MockERC20.t.sol            # Unit tests for mock token
 ├── script/
-│   ├── Deploy.s.sol               # Full deployment script
-│   ├── DeployMocks.s.sol          # Deploy mock price feeds for demo
+│   ├── Deploy.s.sol               # Full Unichain deployment (hook + pool)
+│   ├── DeployMockFeeds.s.sol      # Deploy mock price feeds to source chains
+│   ├── DeployReactiveSender.s.sol # Deploy Reactive sender to Lasna
 │   └── TriggerDepeg.s.sol         # Demo script — simulate a depeg event
 ├── lib/                           # Forge dependencies
 ├── foundry.toml
@@ -228,24 +234,31 @@ cp .env.example .env
 ### Deploy to Unichain Sepolia
 
 ```bash
-# Deploy mock price feeds first (for testnet demo)
-forge script script/DeployMocks.s.sol \
-  --rpc-url unichain_sepolia \
-  --broadcast \
-  --verify
-
-# Deploy the main PEGKEEPER hook
+# Deploy the full PEGKEEPER system (hook + mock token + pool)
 forge script script/Deploy.s.sol \
   --rpc-url unichain_sepolia \
   --broadcast \
   --verify
 ```
 
-### Deploy Reactive Monitor
+### Deploy Mock Price Feeds to Source Chains
 
 ```bash
-# Deploy to Reactive Kopli testnet
-forge script script/Deploy.s.sol:DeployReactiveMonitor \
+# Deploy to each source chain (Ethereum Sepolia, Base Sepolia, Polygon Amoy)
+forge script script/DeployMockFeeds.s.sol \
+  --rpc-url ethereum_sepolia \
+  --broadcast
+
+forge script script/DeployMockFeeds.s.sol \
+  --rpc-url base_sepolia \
+  --broadcast
+```
+
+### Deploy Reactive Sender
+
+```bash
+# Deploy to Reactive Lasna testnet
+forge script script/DeployReactiveSender.s.sol \
   --rpc-url reactive_kopli \
   --broadcast
 ```
@@ -258,50 +271,58 @@ The demo simulates a stablecoin depeg in real time and shows PEGKEEPER respondin
 
 **Step 1 — Verify the pool is in GREEN stage**
 ```bash
-cast call $PEGKEEPER_HOOK_ADDRESS "getProtectionStage()" \
+cast call 0xD097AaE843980Da4b8b5D273c154a80b9414DC80 \
+  "getProtectionStage()(uint8)" \
   --rpc-url unichain_sepolia
 # Returns: 0 (GREEN)
 ```
 
-**Step 2 — Trigger a mild depeg signal (YELLOW)**
+**Step 2 — Trigger a mild depeg signal (YELLOW) on 2 source chains**
 ```bash
 forge script script/TriggerDepeg.s.sol:TriggerYellow \
-  --rpc-url ethereum_sepolia \
-  --broadcast
-# Pushes USDC price to $0.997 on Ethereum + Base mock feeds
+  --rpc-url ethereum_sepolia --broadcast
+
+forge script script/TriggerDepeg.s.sol:TriggerYellow \
+  --rpc-url base_sepolia --broadcast
+# Pushes price to $0.998 on Ethereum + Base mock feeds
 ```
 
-**Step 3 — Watch Reactive relay the alert to Unichain**
-
-Within 1–2 seconds, check the hook stage:
+**Step 3 — Wait ~30s for Reactive to relay, then check stage**
 ```bash
-cast call $PEGKEEPER_HOOK_ADDRESS "getProtectionStage()" \
+cast call 0xD097AaE843980Da4b8b5D273c154a80b9414DC80 \
+  "getProtectionStage()(uint8)" \
   --rpc-url unichain_sepolia
-# Returns: 1 (YELLOW) — fees already updated to 0.05%
+# Returns: 1 (YELLOW) — swap fee now 0.05%
 ```
 
 **Step 4 — Escalate to ORANGE**
 ```bash
 forge script script/TriggerDepeg.s.sol:TriggerOrange \
-  --rpc-url ethereum_sepolia \
-  --broadcast
-# Pushes USDC price to $0.991 across 3 chains
+  --rpc-url ethereum_sepolia --broadcast
+
+forge script script/TriggerDepeg.s.sol:TriggerOrange \
+  --rpc-url base_sepolia --broadcast
+# Returns: 2 (ORANGE) after relay — swap fee now 0.30%, deposits paused
 ```
 
-**Step 5 — Attempt an arb attack**
+**Step 5 — Escalate to RED (full crisis)**
 ```bash
-forge script script/TriggerDepeg.s.sol:SimulateArbBot \
-  --rpc-url unichain_sepolia \
-  --broadcast
-# Shows the attack is unprofitable due to elevated fees
+forge script script/TriggerDepeg.s.sol:TriggerRed \
+  --rpc-url ethereum_sepolia --broadcast
+
+forge script script/TriggerDepeg.s.sol:TriggerRed \
+  --rpc-url base_sepolia --broadcast
+# Returns: 3 (RED) after relay — swap fee 1.00%, conservative LPs signalled to exit
 ```
 
 **Step 6 — Trigger recovery**
 ```bash
 forge script script/TriggerDepeg.s.sol:TriggerRecovery \
-  --rpc-url ethereum_sepolia \
-  --broadcast
-# Pushes USDC price back to $1.00 — pool returns to GREEN
+  --rpc-url ethereum_sepolia --broadcast
+
+forge script script/TriggerDepeg.s.sol:TriggerRecovery \
+  --rpc-url base_sepolia --broadcast
+# Pushes price back to $1.00 — pool returns to GREEN after relay
 ```
 
 ---
@@ -315,11 +336,10 @@ forge test
 # Run with detailed output
 forge test -vvvv
 
-# Run only unit tests
+# Run specific contract tests
 forge test --match-path test/PegKeeper.t.sol
-
-# Run integration tests
-forge test --match-path test/Integration.t.sol
+forge test --match-path test/ReactiveMonitor.t.sol
+forge test --match-path test/ReactiveSender.t.sol
 
 # Gas report
 forge test --gas-report
