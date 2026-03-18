@@ -29,7 +29,7 @@ PEGKEEPER is a Uniswap v4 hook purpose-built for stablecoin pools. It combines t
 - **Reactive Network** — watches stablecoin prices across Ethereum, Base, and Arbitrum simultaneously, 24/7, with no off-chain bots or keepers
 - **Unichain** — provides the speed, TEE protection, and cheap execution needed to respond before attackers arrive
 
-The moment Reactive detects depeg pressure across multiple chains simultaneously, it fires an alert to the PEGKEEPER hook on Unichain. The hook then escalates through graduated protection stages — adjusting fees and LP ranges automatically — before arbitrage bots can exploit the gap.
+The moment Reactive detects depeg pressure across multiple chains simultaneously, it fires an alert to the PEGKEEPER hook on Unichain. The hook then escalates through graduated protection stages — adjusting fees and blocking deposits automatically — before arbitrage bots can exploit the gap.
 
 The result is a stablecoin pool that **actively defends its LPs** instead of waiting to be drained.
 
@@ -62,14 +62,14 @@ USDC drops to $0.996 on Ethereum + Base  → alert fired, this is real
 
 PEGKEEPER does not flip between calm and panic. It responds proportionally.
 
-| Stage | Trigger | Fees | LP Ranges | Deposits |
-|-------|---------|------|-----------|----------|
-| GREEN | Price $0.999 – $1.001 | 0.01% | Narrow | Open |
-| YELLOW | Multi-chain pressure, price $0.996 – $0.999 | 0.05% | Slightly wider | Open |
-| ORANGE | Sustained pressure, price $0.990 – $0.995 | 0.30% | Wide | Paused |
-| RED | Crisis level, price below $0.985 | Maximum | Full width | Paused |
+| Stage | Trigger | Swap Fee | New Deposits |
+|-------|---------|----------|--------------|
+| GREEN | Price $0.999 – $1.001 | 0.01% | Open |
+| YELLOW | Multi-chain pressure, price $0.996 – $0.999 | 0.05% | Open |
+| ORANGE | Sustained pressure, price $0.990 – $0.995 | 0.30% | Paused |
+| RED | Crisis level, price below $0.985 | 1.00% | Paused |
 
-Conservative LPs who opted in to auto-protection are withdrawn at RED stage before the worst hits.
+At RED stage, conservative LPs who opted in at deposit time receive an on-chain withdrawal signal — their position data is emitted as a `ConservativeWithdrawalTriggered` event so they (and any off-chain tooling they use) know to exit before the worst hits.
 
 ### Unichain Executes Faster Than Bots
 
